@@ -1,0 +1,41 @@
+#!/bin/bash
+
+USER="$(basename $0 | sed -e 's/[0-9][0-9]-ns-\?\(.*\)\..\+/\1/')"
+BR_NAME=br-netns
+
+if [ -z "$USER" ]; then
+    exit 0
+fi
+
+#
+# Remove mount namespace
+#
+MNS_DIR=/run/mountns
+MNS_FILE=${MNS_DIR}/${USER}
+
+if [ -f ${MNS_FILE} ]; then
+    umount -q $MNS_FILE
+
+    if [ -z "$(mount | grep $MNS_FILE)" ]; then
+        rm -f $MNS_FILE
+    fi
+fi
+
+#
+# Remove network namespace
+#
+NNS_DIR=/run/netns
+NNS_NAME=${USER}
+NNS_FILE=${NNS_DIR}/${NNS_NAME}
+
+if [ -f ${NNS_FILE} ]; then
+    # remove network namespace
+    ip netns del ${NNS_NAME}
+    ip link set dev veth-${NNS_NAME} down
+    ip link del veth-${NNS_NAME}
+    # remove bridge in host if necessary
+    if [ -z "$(ls ${NNS_DIR}/)" ]; then
+        ip link set dev ${BR_NAME} down
+        ip link del dev ${BR_NAME}
+    fi
+fi

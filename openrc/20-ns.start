@@ -1,0 +1,86 @@
+#!/bin/sh
+
+USER="$(basename $0 | sed -e 's/[0-9][0-9]-ns-\?\(.*\)\..\+/\1/')"
+BR_NAME=br-netns
+BR_IP="192.168.8.1"
+BR_ADDR="${BR_IP}/24 brd 192.168.8.255"
+ETH0_IP="192.168.8.2"
+ETH0_ADDR="${ETH0_IP}/24 brd 192.168.8.255"
+
+if [ -z "$USER" ]; then
+    exit 0
+fi
+
+#
+# Setup mount namesapce
+#
+MNS_DIR=/run/mountns
+MNS_FILE=${MNS_DIR}/${USER}
+
+if [ -z "$(mount | grep $MNS_FILE)" ]; then
+    mkdir -p $MNS_DIR
+    touch $MNS_FILE
+    # create persistent mount namespace
+    unshare --mount=$MNS_FILE logger "Create persistent mount namespace at $MNS_FILE"
+fi
+
+#
+# Setup network namespace
+#
+# Additionaly make sure you have:
+#   - sysctl -w net.ipv4.ip_forward = 1
+#   for your bridge network:
+#   - iptables -t nat -A POSTROUTING -s 192.168.8.0/24 -j MASQUERADE
+#
+NNS_DIR=/run/netns
+NNS_NAME=${USER}
+NNS_FILE=${NNS_DIR}/${NNS_NAME}
+
+if [ ! -f ${NNS_FILE} ]; then
+    # setup bridge in host if necessary
+    if ! $(ip link show ${BR_NAME} > /dev/null 2>&1); then
+        ip link add name ${BR_NAME} type bridge
+        ip addr add ${BR_ADDR} dev ${BR_NAME}
+        ip link set ${BR_NAME} up
+    fi
+    # setup network namespace
+    ip netns add ${NNS_NAME}
+    logger "Create network namespace at $NNS_FILE"
+    ip link add veth-${NNS_NAME} type veth peer name eth0 netns ${NNS_NAME}
+    ip netns exec ${NNS_NAME} ip link set lo up
+    ip netns exec ${NNS_NAME} ip link set eth0 up
+    ip netns exec ${NNS_NAME} ip addr add ${ETH0_ADDR} dev eth0
+    ip netns exec ${NNS_NAME} ip route add default via ${BR_IP}  dev eth0
+    ip netns exec ${NNS_NAME} ip route add 192.168.1.0/24 via ${BR_IP}  dev eth0
+    # connect namespace to host bridge
+    ip link set veth-${NNS_NAME} master ${BR_NAME}
+    ip link set veth-${NNS_NAME} up
+fi
+
+#
+# initial configuration for sandbox
+#
+
+ns() {
+    nsenter --net=${NNS_FILE} --mount=${MNS_FILE} $@
+}
+
+if [ -f ${MNS_FILE} -a -f ${NNS_FILE} ]; then
+    # setup tmpfs dir
+    tmp_dir=/home/${USER}/.config/sandbox
+
+    mkdir -p ${tmp_dir}
+
+    if [ -z "$(ns mount | grep ${tmp_dir})" ]; then
+        ns mount -t tmpfs tmpfs ${tmp_dir}
+    fi
+
+    # bind mount resolv.conf
+    nm_path=${tmp_dir}/NetworkManager
+
+    if [ -z "$(ns mount | grep /run/NetworkManager)" ]; then
+        ns mkdir -p ${nm_path}
+        ns cp -r /run/NetworkManager/* ${nm_path}
+        ns mount -o bind ${nm_path} /run/NetworkManager
+    fi
+fi
