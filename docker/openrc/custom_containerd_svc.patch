@@ -1,0 +1,26 @@
+diff --git a/contrib/init/openrc/docker.confd b/contrib/init/openrc/docker.confd
+index 53bab813a9..2d73d34758 100644
+--- a/contrib/init/openrc/docker.confd
++++ b/contrib/init/openrc/docker.confd
+@@ -25,5 +25,8 @@
+ # where the docker daemon itself is run from
+ #DOCKERD_BINARY="/usr/bin/dockerd"
+ 
++# containerd service name
++#CONTAINERD_SVC="containerd"
++
+ # any other random options you want to pass to docker
+ DOCKER_OPTS=""
+diff --git a/contrib/init/openrc/docker.initd b/contrib/init/openrc/docker.initd
+index 61d8906f36..ddc5fe2cc5 100644
+--- a/contrib/init/openrc/docker.initd
++++ b/contrib/init/openrc/docker.initd
+@@ -18,7 +18,7 @@ rc_ulimit="${DOCKER_ULIMIT:--c unlimited -n 524288 -u unlimited}"
+ retry="${DOCKER_RETRY:-TERM/60/KILL/10}"
+ 
+ depend() {
+-	need containerd
++	need ${CONTAINERD_SVC:-containerd}
+ }
+ 
+ start_pre() {
